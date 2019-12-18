@@ -1,0 +1,426 @@
+<html>
+<head>
+<title>MHE Content Tool API Test Rig (v3.0.1 2018.06.11)</title>
+<!--
+	Caveat Scriptor
+	
+	This MUST be run served from from a web server in order for cross frame communication
+	to function.  Browsers do not permit cross-frame communication between pages served from
+	file:/// URL's.  Any web server - localhost is fine, 127.0.0.1, for some reason, is not...
+	
+	In operation, the domains of the tool content server and the consumer's host page server,
+	must agree.  They may both be degraded to the lowest level domain - e.g. both mheducation.com.  
+	
+	The simplest solution is for the consumer's host page server to proxy the tool content
+	server.  The content is small, changes infrequently, and can have a CDN and use aggressive
+	cache settings to nearly eliminate any performance impact from the the introduction of a
+	proxy.  I'm not a fan of proxies but that abstraction layer has saved a lot of administrative
+	and management headaches.  Don't discount the use of a proxy out of hand.
+	
+	API Author:  Malcolm Duncan  W.Malcolm.Duncan@mheducation.com  wmd@clearlearning.com
+-->
+
+<script type="text/javascript" src="jquery/jquery.js"></script>
+<script type="text/javascript" src="hostPage_v3.js"></script>
+	
+<script language="javascript" type="text/javascript">	
+
+/* uncomment to degrade domain to lowest common denomination for testing off localhost
+var dName = document.domain;
+if ((dName.indexOf(".com") > -1) && (dName.indexOf(".") > -1)) {
+	var temp = dName.split(".");
+	dName = temp[temp.length - 2] + "." + temp[temp.length - 1];
+}
+//alert('rig base domain: ' + dName);
+document.domain= dName;
+*/
+	
+	/* included here for convenience - already exists in hostPageAPI.js
+	var	MODE_PREVIEW 		= "preview";	// mode showing correct answers in place
+	var	MODE_TEST			= "test";		// standard student mode
+	var	MODE_PREGRADE		= "sample";		// mode to pregrade only items answered
+	var	MODE_POST_TEST		= "review";		// mode to fully grade/score the object
+	var	MODE_DESIGN			= "design";		// mode to self-define input state
+	*/
+	
+	/* NAMING conventions
+		thisItemID is typically the id of the item enclosing multiple tools.  In general, that
+		typically means a question id for the consumer assessment system.  In this example, we
+		use "ext_012345678".
+		
+		Parameters tied to the item, such as media and random variables are named with the itemid
+		followed by an underscore followed by a name.  e.g. ext_012345678_rnd
+				
+		Each tool instantiation is rendered in an iframe.  The iframe's id is composed of the
+		item id followed by and underscore followed by a tool instance id since multiple tool
+		instances may appear on a page.  In this example, we have only one instance whose id
+		is "1".  e.g. "ext_012345678_1"
+		
+		Params involved in instantiation of a tool are composed of the tool's iframe id followed
+		by an underscore followed by a name.  e.g. "ext_012345678_1_state"
+
+		Policies imposed by the enclosing platform or item and are free form.
+		e.g.  p_showhints or role
+		
+		It is the responsibility of the implemetor of the host page to make these available to
+		the API.  In this example, we will be doing that with the apiData object in the toolSideAPI.js
+		library.  This host page's script will be making appropriate calls to populate that library.
+	*/
+	
+	var thisITEMid = "ext_012345678";
+	
+	/*
+		Initialize tool host page API.  This is where we initialize the JS Object model and populate
+		its apiData object.  This would be where your implementation would process your data model
+		into the tool page's model.  You may choose to make your model do this natively and without
+		a level of abstraction like this.
+	*/
+	function initToolAPI()
+	{
+		var initObj= new Object();
+		initObj.itemID= thisITEMid;
+		initObj.saveService= $('#tool_save_service').val();
+		initObj.resultsService= $('#tool_results_service').val();
+		initObj.supportMessage= "back end communication failed";
+		initObj.saveThrottle= 5;
+		
+		ex_init( initObj );
+		
+		ex_buildRandoms( $('#combined_randoms').val() );
+		
+		var policies= JSON.parse( $('#policies_json').val() );
+		for (x in policies)
+		{
+			ex_addPolicy( x, policies[x] );
+		}
+		
+		/*
+		ex_addPolicy( "p_showhints", $('#p_showhints').val() );
+		ex_addPolicy( "role", $('#role').val() );
+		ex_addPolicy( "p_solution", $('#p_solution').val() );
+		*/
+		
+		ex_addMedia( $('#combined_media').val() );	
+		
+		/*
+			You'd probably loop through your data model calling ex_addInstance() here.
+			For this testRig, we only instantiate one tool and we start over a lot for 
+			debugging purposes.  Thus, we do that later in the doit methods below.
+		*/
+	}
+	
+	// instantiate the simulated tool assuming it only understands a combined state
+	function doit_v1()
+	{
+		initToolAPI();
+
+		ex_addPolicy( "force_combined", "true" );
+		
+		ex_addInstance(
+			"1",
+			$('#tool_state').val(), 
+			"", 
+			$('#tool_mode').val(), 
+			$('#tool_score').val(), 
+			$('#tool_completion').val(),
+			""
+		);
+		
+		doit( thisITEMid + "_1" );
+	}
+	
+	// instantiate the simulated tool assuming it understands a separated state
+	function doit_v3()
+	{
+		initToolAPI();
+		
+		ex_addPolicy( "force_combined", null );
+		
+		var theMode= $('#tool_mode').val();
+		var theKey= "";
+		if (theMode == EX_MODE_DESIGN) theKey= $('#tool_key').val();
+		
+		ex_addInstance(
+			"1",
+			$('#tool_definition').val(), 
+			$('#tool_response').val(), 
+			theMode, 
+			$('#tool_score').val(), 
+			$('#tool_completion').val(),
+			theKey, 
+		);
+		
+		doit( thisITEMid + "_1" );
+	}
+	
+	// instantiate the tool in the UI
+	function doit( toolInstance )
+	{
+		var iFrameHTML= '<br>&nbsp;<br><iframe class="wk_ex_iframe" style="z-index: 1" allow="microphone *; camera *" ';
+		iFrameHTML += 'name="' + toolInstance + '" id="' + toolInstance + '" frameborder="1" ';
+		iFrameHTML += 'src="' + $('#identifier').val() + '?' + toolInstance + '" ';
+		iFrameHTML += 'width="' + $('#frame_width').val() + '" ';
+		iFrameHTML += 'height="' + $('#frame_height').val() + '">';
+		iFrameHTML += '</iframe>';
+		$('#testFrame').html(iFrameHTML);
+	}
+	
+
+	/*
+		Pull in the data from the tool into the testRig UI.  This IS a DOM operation and ONLY
+		for testRig.  You shouldn't store tool data in the DOM - interactions are too expensive
+		in terms of performance.
+	*/
+	function retrieveCombined()
+	{
+		var toolInstance= "ext_012345678_1";
+
+		try
+		{
+			$('#output_state').val( window.frames[toolInstance].getState() );
+			$('#tool_score').val( window.frames[toolInstance].getScore() );
+			$('#tool_completion').val( window.frames[toolInstance].getCompletion( $('#output_state').val() ) );
+		}
+		catch (err)
+		{
+			ex_log("Error in retrieveCombined(): " + err);
+		}
+	}
+	
+	/*
+		Pull in the data from the tool into the testRig UI.  This IS a DOM operation and ONLY
+		for testRig.  You shouldn't store tool data in the DOM - interactions are too expensive
+		in terms of performance.
+	*/
+	function retrieveSeparated()
+	{
+		var toolInstance= "ext_012345678_1";
+		var definition= "";
+		var key= "";
+		var response= "";
+		var results= "";
+
+		var theMode= $('#tool_mode').val();
+
+		try
+		{
+			if (typeof window.frames[toolInstance].getDefinition === 'function')
+			{
+				definition= window.frames[toolInstance].getDefinition();
+			}
+			else ex_log("getDefinition() unimplemented in tool instance");
+
+			if (theMode == EX_MODE_DESIGN) 
+			{
+				$('#output_definition').val( definition );
+
+				if (typeof window.frames[toolInstance].getKey === 'function')
+				{
+					key= window.frames[toolInstance].getKey();
+					$('#output_key').val( key );
+				}
+				else ex_log("getDefinition() unimplemented in tool instance");
+			}
+			else
+			{
+				ex_log("Test Rig v3:  Response, Definition, and Key should only be retrieved in design mode.");
+				$('#output_definition').val( "" );
+				$('#output_key').val( "" );
+				$('#tool_response').val( "" );
+			}
+
+			if (theMode == EX_MODE_TEST)
+			{
+				if (typeof window.frames[toolInstance].getResponse === 'function')
+				{
+					response= window.frames[toolInstance].getResponse();
+					$('#tool_response').val( response );
+				}
+				else ex_log("getResponse() unimplemented in tool instance");
+
+				/*
+				if (typeof window.frames[toolInstance].getResults === 'function')
+				{
+					results= window.frames[toolInstance].getResults( definition, response );
+					$('#results').val( results );
+				}
+				else ex_log("getResults() unimplemented in tool instance");
+						
+				var resultsObj= JSON.parse(results);
+				if (resultsObj.score) $('#tool_score').val( resultsObj.score );
+				if (resultsObj.completion) $('#tool_completion').val( resultsObj.completion );
+				if (resultsObj.grading) $('#grading').val( resultsObj.grading );
+				*/
+			}
+			else ex_log("Test Rig v3:  Response should only be pushed via save().  Response and Results retrieved for test mode ONLY in test rig.");
+		}
+		catch (err)
+		{
+			ex_log("Error in retrieveSeparated(): " + err);
+		}
+	}
+	
+	
+	function retrieveResults()
+	{
+		var toolInstance= "ext_012345678_1";
+		var theMode= $('#tool_mode').val();
+		ex_trigger_retrieveResults( theMode, toolInstance, resultsCallback );
+	}
+	
+	function resultsCallback( result )
+	{
+		ex_log("TestRig v3:  simulating the return of JSON results with a static call for a JSON doc.");
+		
+		// demonstrating that the data returned should identify a tool instance in our object model
+		// var toolIdentifier= result.qid + "_" + result.instanceid;
+		// var	thisToolObject = apiData.tools[ toolIdentifier ];
+
+		// thisToolObject.score= result.score;
+		// thisToolObject.completion= result.completion;
+		
+		ex_log("TestRig v3:  ignoring the returned JSON and replacing with actual score and completion from v1 calls.");
+		$('#backend_score').val( result.score );
+		$('#backend_completion').val( result.completion );
+		$('#grading').val(JSON.stringify( result ) );
+	}
+	
+
+	// convenience function for testRig
+	function copyState()
+	{
+		$('#tool_state').val( $('#output_state').val() );
+	}
+
+	
+	// convenience function for testRig
+	function copySeparated()
+	{
+		$('#tool_definition').val( $('#output_definition').val() );
+		$('#tool_key').val( $('#output_key').val() );
+	}
+
+	
+	// this is the consumer dependent portion of askPublisher
+	// you'd typically wire this into some means to send this info to customer support
+	function askPublisherAPI( qid, message )
+	{
+		alert('contactPublisher called for qid ' + qid + ' with message: ' + message);
+	}
+</script>
+
+</head>
+
+<body>
+	<span style="font-size: 14pt; font-weight: bold;">
+		MHE Content Tool API Authoring Test Rig (v3.0.1 2018.06.11)
+	</span><br>
+	<i><u>must</u> be rendered by a web server</i><!-- it can be a local web server on your development machine -->
+	<br>&nbsp;<br>
+	
+	<form name="testrig" onsubmit="return false;">
+	
+		<table border="0" cellspacing="0" cellpadding="2">
+
+			<tr>
+				<td valign="top">
+					<b>Tool Path:<br><input type="text" size="50" name="identifier" id="identifier" value="atinit_local_v3.html"><br>		
+					<b>Save Service:<br><input type="text" size="50" name="tool_save_service" id="tool_save_service" value="API/putStateJSON"><br>
+					<b>Results Service:</b><br><input type="text" size="50" name="tool_results_service" id="tool_results_service" value="http://172.16.21.121:3000/score">
+
+					<br>&nbsp;<br><b>initial iFrame Size</b>
+					<input type="text" size="4" value="500" id="frame_width">W x 
+					<input type="text" size="4" value="400" id="frame_height">H<br>
+					<input type="hidden" name="tool_mode" id="tool_mode" value="test">
+				</td>
+				<td valign="top">
+					<b>Policies JSON:</b><br>
+					<textarea name="policies_json" id="policies_json" rows="6" cols="50">{
+"p_showhints" : "on",
+"p_solution" : "on",
+"role" : "student"
+}</textarea>
+
+					<br><b>Sample Randoms</b><br><input type="text" size="50" id="combined_randoms" value="a=5;b=10;c[0]=abacab">
+					<br>&nbsp;
+					<br><b>Media</b><br><input type="text" size="50" id="combined_media" value="http://localhost/ExternalAPI/media/,apple.gif,eztest.jpg">
+				</td>
+
+				<td rowspan="4" id="testFrame" align="left" valign="center" width="60%">
+					<br>&nbsp;<br>
+					<iframe class="wk_ex_iframe" style="z-index: 1"
+						name="ext_012345678_1" id="ext_012345678_1" frameborder="1" src=""
+						width="400" height="300"> </iframe>
+				</td>
+			</tr>
+		
+			<tr bgcolor="#ffffe6">
+				<td valign="top">
+					<br><b>v3 Definition:</b><br>
+					<textarea name="tool_definition" id="tool_definition" rows="4" cols="50">0
+					</textarea>
+					<br><b>v3 Key:</b><br>
+					<textarea name="tool_key" id="tool_key" rows="6" cols="50">0</textarea>
+					<br><b>Response:</b><br>
+					<textarea name="tool_response" id="tool_response" rows="2" cols="50">0</textarea>
+				</td>
+				<td valign="top">
+					<br><button onclick="retrieveSeparated();">Retrieve Definition & Key</button>
+					&nbsp;<button onclick="copySeparated();">&lt;- copy</button><br>
+					<textarea name="output_definition" id="output_definition" rows="4" cols="50"></textarea><br>
+					
+					<br><textarea name="output_key" id="output_key" rows="6" cols="50"></textarea>
+					
+					<br><button style="color: red; font-size: 14pt; font-weight: bold;" onclick="doit_v3();">Load v3</button>
+					<select name="mode_select" onchange="document.testrig.tool_mode.value= options[selectedIndex].value;document.testrig.mode_select2.selectedIndex=this.selectedIndex;">
+						<option selected value="test">MODE_TEST</option>
+						<option value="preview">MODE_PREVIEW</option>
+						<option value="sample">MODE_PREGRADE</option>
+						<option value="review">MODE_POST_TEST</option>
+						<option value="design">MODE_DESIGN</option>
+					</select>
+				</td>
+
+			</tr>
+		
+			<tr bgcolor="#ffffe6">
+				<td valign="top">
+					<b>Saved to back end:</b><br>
+					<textarea name="tool_save" id="tool_save" rows="6" cols="50"></textarea>
+				</td>
+				<td valign="top">
+					<button onclick="retrieveResults();">Retrieve Results from Server</button><br>
+					<textarea name="grading" id="grading" rows="6" cols="50"></textarea>
+					<br><i>Score:</i>&nbsp;<input type="text" name="backend_score" id="backend_score" size="5">&nbsp;
+					<i>Completion:</i>&nbsp;<input type="text" name="backend_completion" id="backend_completion" size="5"> <i>actual</i>
+				</td>
+			</tr>
+		
+			<tr bgcolor="#f2f2f2">
+				<td valign="top">
+					<br><b>v1 State:</b><br>
+					<textarea name="tool_state" id="tool_state" rows="9" cols="50">0</textarea>
+				</td>
+				<td>
+					<br><button onclick="retrieveCombined();">Retrieve State, Score, & Completion</button>
+					&nbsp;<button onclick="copyState();">&lt;- copy</button><br>
+					<textarea name="output_state" id="output_state" rows="5" cols="50"></textarea><br>
+					<i>Score:</i>&nbsp;<input type="text" name="tool_score" id="tool_score" size="5">&nbsp;
+					<i>Completion:</i>&nbsp;<input type="text" name="tool_completion" id="tool_completion" size="5">
+
+					<br><button  style="color: red; font-size: 14pt; font-weight: bold;" onclick="doit_v1();">Load v1</button>					
+					<select name="mode_select2" onchange="document.testrig.tool_mode.value= options[selectedIndex].value;document.testrig.mode_select.selectedIndex=this.selectedIndex;">
+						<option selected value="test">MODE_TEST</option>
+						<option value="preview">MODE_PREVIEW</option>
+						<option value="sample">MODE_PREGRADE</option>
+						<option value="review">MODE_POST_TEST</option>
+						<option value="design">MODE_DESIGN</option>
+					</select>					
+				</td>
+			</tr>
+		
+		</table>
+
+	</form>
+	</body>
+</html>
