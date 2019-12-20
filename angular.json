@@ -29,7 +29,11 @@
             "styles": [
               "src/styles.scss"
             ],
-            "scripts": [],
+            "scripts": [
+              "API/jquery-1.9.1.min.js",
+              "API/toolSideAPI.js",
+              "src/mcqezto.js"
+            ],
             "es5BrowserSupport": true
           },
           "configurations": {
