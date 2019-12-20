@@ -8,7 +8,7 @@
     "test": "ng test",
     "lint": "ng lint",
     "e2e": "ng e2e",
-    "local-server": "light-server -s . -p 7000"
+    "light-server": "light-server -s . -p 7000"
   },
   "private": true,
   "dependencies": {
